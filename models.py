@@ -180,5 +180,6 @@ class Seq2Seq(nn.Module):
             if train:
                 output = trg[:, t]
             else:
-                output = output.argmax(1) #TODO force not padded by setting value to -100
+                output[:,0] = -100
+                output = output.argmax(1)
         return outputs
