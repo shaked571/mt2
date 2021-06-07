@@ -177,8 +177,8 @@ class Seq2Seq(nn.Module):
                 # output, hidden, attn_weights = self.decoder(
                 #     output, hidden, encoder_output)
             outputs = torch.cat((outputs, output.unsqueeze(0)),dim=1)
-            if train == True:
+            if train:
                 output = trg[:, t]
             else:
-                output = output.argmax(1)
+                output = output.argmax(1) #TODO force not padded by setting value to -100
         return outputs
