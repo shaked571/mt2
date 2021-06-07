@@ -180,6 +180,6 @@ class Seq2Seq(nn.Module):
             if train:
                 output = trg[:, t]
             else:
-                output[:,0] = -100
+                output[:, 0] = -100 # Dont allow prediction of Padding index.
                 output = output.argmax(1)
         return outputs
