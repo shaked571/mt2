@@ -201,47 +201,42 @@ class Trainer:
         with open(pred_path, mode='w') as f:
             f.writelines(res)
 
+
 def parse_arguments():
-    p = argparse.ArgumentParser(description='Hyperparams')
-    p.add_argument('-batch_size', type=int, default=32,
-                   help='number of epochs for train')
-    p.add_argument('-lr', type=float, default=0.0001,
-                   help='initial learning rate')
-    p.add_argument('-grad_clip', type=float, default=10.0,
-                   help='in case of gradient explosion')
+    p = argparse.ArgumentParser(description='Hyper parameters')
+    p.add_argument('-b', '--batch_size', type=int, default=4, help='number of epochs for train')
+    p.add_argument('-lr', type=float, default=0.001, help='initial learning rate')
+    p.add_argument('-hs', '--hidden_size', type=int, default=256, help='number of epochs for train')
+    p.add_argument('-e', '--embed_size', type=int, default=128, help='number of epochs for train')
+    p.add_argument('-p', '--dropout', type=float, default=0.3, help='number of epochs for train')
+
     return p.parse_args()
 
 
 def main():
+    set_seed(42)
+
     args = parse_arguments()
-    hidden_size = 256
-    embed_size = 128
+    hidden_size = args.hidden_size
+    embed_size = args.embed_size
+
     data_path = "data/{}.{}"
 
     source_vocab = Vocab(data_path.format("train", "src"))
     target_vocab = Vocab(data_path.format("train", "trg"))
     encoder = EncoderVanilla(vocab_size=source_vocab.vocab_size, embed_size=embed_size, hidden_size=hidden_size,
-                      n_layers=3, dropout=0.5)
-    decoder = DecoderVanilla(vocab_size= target_vocab.vocab_size,embed_size=embed_size, hidden_size=hidden_size,
-                      n_layers=3, dropout=0.5)
+                             n_layers=3, dropout=args.dropout)
+    decoder = DecoderVanilla(vocab_size=target_vocab.vocab_size, embed_size=embed_size, hidden_size=hidden_size,
+                             n_layers=3, dropout=args.dropout)
     model = Seq2Seq(encoder, decoder)
     print(model)
-    train_df = TranslationDataSet(source=data_path.format("train", "src"),
-                                  target=data_path.format("train", "trg"),
-                                  source_vocab=source_vocab,
-                                  target_vocab=target_vocab
-                                  )
-    dev_df = TranslationDataSet(source=data_path.format("dev", "src"),
-                                target=data_path.format("dev", "trg"),
-                                source_vocab=source_vocab,
-                                target_vocab=target_vocab
-                                )
+    train_df = TranslationDataSet(source=data_path.format("train", "src"), target=data_path.format("train", "trg"),
+                                  source_vocab=source_vocab, target_vocab=target_vocab)
+    dev_df = TranslationDataSet(source=data_path.format("dev", "src"), target=data_path.format("dev", "trg"),
+                                source_vocab=source_vocab, target_vocab=target_vocab)
 
-    trainer = Trainer(model=model,
-                      train_data=train_df,
-                      dev_data=dev_df,
-                      source_vocab=source_vocab,
-                      target_vocab=target_vocab)
+    trainer = Trainer(model=model, train_data=train_df, dev_data=dev_df, source_vocab=source_vocab,
+                      target_vocab=target_vocab, lr=args.lr, )
     trainer.train()
 
 if __name__ == '__main__':
