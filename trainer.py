@@ -79,7 +79,10 @@ class Trainer:
                 self.model.zero_grad()
                 # forward pass: compute predicted outputs by passing inputs to the model
                 output = self.model(source, target, train=True)
-                # calculate the loss
+                output_dim = output.shape[-1]        # Handling batch size N > 1
+                output = output.view(-1, output_dim) # Handling batch size N > 1
+
+            # calculate the loss
                 loss = self.loss_func(output, target.view(-1))
                 # backward pass: compute gradient of the loss with respect to model parameters
                 loss.backward()

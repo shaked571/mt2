@@ -163,7 +163,7 @@ class Seq2Seq(nn.Module):
         batch_size = src.size(0)
         max_len = trg.size(1)
         vocab_size = self.decoder.vocab_size
-        outputs = torch.zeros(batch_size, vocab_size, requires_grad=True, device=self.device)
+        outputs = [torch.zeros(batch_size, vocab_size, requires_grad=True, device=self.device)]
 
         hidden, cell = self.encoder(src)
 
@@ -176,11 +176,11 @@ class Seq2Seq(nn.Module):
                 pass
                 # output, hidden, attn_weights = self.decoder(
                 #     output, hidden, encoder_output)
-            outputs = torch.cat((outputs, output),dim=0)
+            outputs.append(output)
             if train:
                 output = trg[:, t]
             else:
                 output[:, 0] = -100 # Dont allow prediction of Padding index.
                 output = output.argmax(1)
-
+        outputs = torch.stack(outputs,dim=1)
         return outputs
