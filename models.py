@@ -174,7 +174,7 @@ class Seq2Seq(nn.Module):
             else:
                 output[:, 0] = -100  # Dont allow prediction of Padding index.
                 output = output.argmax(1)
-                if all([i == Vocab.END_IDX for i in output.numpy()]): # Support Dev only for batch in size of 1
+                if all([i == Vocab.END_IDX for i in output.cpu().numpy()]): # Support Dev only for batch in size of 1
                     break
 
 
