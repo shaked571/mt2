@@ -41,7 +41,7 @@ def pad_collate(batch):
 
 class Trainer:
     def __init__(self, model: nn.Module, train_data: Dataset, dev_data: Dataset, source_vocab: Vocab,
-                 target_vocab: Vocab,train_batch_size=1, lr=0.002, part=None, output_path=None):
+                 target_vocab: Vocab, train_batch_size=2, lr=0.002, part=None, output_path=None):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.part = part
         self.model = model
@@ -50,11 +50,11 @@ class Trainer:
         self.source_vocab = source_vocab
         self.target_vocab = target_vocab
         self.train_data = DataLoader(train_data, batch_size=train_batch_size, collate_fn=pad_collate)
-        self.dev_data = DataLoader(dev_data, batch_size=self.dev_batch_size,  collate_fn=pad_collate)
+        self.dev_data = DataLoader(dev_data, batch_size=self.dev_batch_size, collate_fn=pad_collate)
         self.optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=1e-4)
         self.loss_func = nn.CrossEntropyLoss(ignore_index=self.target_vocab.PAD_IDX)
         self.model.to(self.device)
-        self.model_args = {"part": self.part, "lr": lr,"batch_size": train_batch_size,
+        self.model_args = {"part": self.part, "lr": lr, "batch_size": train_batch_size,
                            "hidden_dim": self.model.encoder.hidden_size}
         if output_path is None:
             output_path = self.suffix_run()
@@ -65,25 +65,20 @@ class Trainer:
         self.best_score = 0
 
     def train(self):
-        num_samples=0
         for epoch in range(self.n_epochs):
             print(f"start epoch: {epoch + 1}")
             train_loss = 0.0
             step_loss = 0
             self.model.train()  # prep model for training
-            for step, (source, target, source_lens, target_lens) in tqdm(enumerate(self.train_data), total=len(self.train_data)):
-                num_samples += self.train_data.batch_size
+            for step, (source, target, source_lens, target_lens) in tqdm(enumerate(self.train_data),
+                                                                         total=len(self.train_data)):
                 source = source.to(self.device)
                 target = target.to(self.device)
                 # clear the gradients of all optimized variables
                 self.optimizer.zero_grad()
                 self.model.zero_grad()
                 # forward pass: compute predicted outputs by passing inputs to the model
-                output = self.model(source, target, train=True)  # Eemnded Data Tensor size (1,5)
-                output_dim = output.shape[-1]
-                output = output.view(-1, output_dim)
-                output = output[1:]
-                target = target[:,1:]
+                output = self.model(source, target, train=True)
                 # calculate the loss
                 loss = self.loss_func(output, target.view(-1))
                 # backward pass: compute gradient of the loss with respect to model parameters
@@ -94,19 +89,12 @@ class Trainer:
                 # update running training loss
                 train_loss += loss.item() * target.size(0)
                 step_loss += loss.item() * target.size(0)
-                # if num_samples >= self.steps_to_eval:
-                #     num_samples = 0
-                #     print(f"in step: {(step+1)*self.train_data.batch_size} train loss: {step_loss}")
-                #     self.writer.add_scalar('Loss/train_step', step_loss, step * (epoch + 1))
-                #     step_loss = 0.0
-                #     # print((step+1)*self.train_data.batch_size + epoch * len(self.train_data))
-                #     self.evaluate_model((step+1)*self.train_data.batch_size + epoch * len(self.train_data), "step", self.dev_data) TODO delete
             print(f"in epoch: {epoch + 1} train loss: {train_loss}")
-            self.writer.add_scalar('Loss/train', train_loss, epoch+1)
-            print((epoch+1) * len(self.train_data) * self.train_data.batch_size)
-            self.evaluate_model((epoch+1) * len(self.train_data)*self.train_data.batch_size, "epoch", self.dev_data)
+            self.writer.add_scalar('Loss/train', train_loss, epoch + 1)
+            print((epoch + 1) * len(self.train_data) * self.train_data.batch_size)
+            self.evaluate_model((epoch + 1) * len(self.train_data) * self.train_data.batch_size, "epoch", self.dev_data)
 
-    def evaluate_model(self, step, stage, data_set,write=True):
+    def evaluate_model(self, step, stage, data_set, write=True):
         with torch.no_grad():
             self.model.eval()
             loss = 0
@@ -114,14 +102,13 @@ class Trainer:
             prediction = []
             all_target = []
             for eval_step, (source, target, source_lens, target_lens) in tqdm(enumerate(data_set), total=len(data_set),
-                                                                          desc=f"dev step {step} loop"):
+                                                                              desc=f"dev step {step} loop"):
                 source = source.to(self.device)
                 target = target.to(self.device)
                 output = self.model(source, target, train=False)
                 output_dim = output.shape[-1]
 
-                loss = self.loss_func(output.view(-1, output_dim),
-                                      target.view(-1))
+                loss = self.loss_func(output.view(-1, output_dim), target.view(-1))
                 loss += loss.item()
                 predicted = torch.argmax(output.view(-1, output_dim), dim=1)
                 prediction.append(predicted.view(-1).tolist())
@@ -141,7 +128,6 @@ class Trainer:
             else:
                 print(f'Accuracy/train_{stage}: {bleu_score}')
 
-
         self.model.train()
 
     def suffix_run(self):
@@ -152,24 +138,23 @@ class Trainer:
         return res
 
     def test(self, test_df):
-        test = DataLoader(test_df, batch_size=self.dev_batch_size,  collate_fn=pad_collate)
+        test = DataLoader(test_df, batch_size=self.dev_batch_size, collate_fn=pad_collate)
         self.model.load_state_dict(torch.load(self.saved_model_path))
         self.model.eval()
         prediction = []
-        for eval_step, (data, _, data_lens, _) in tqdm(enumerate(test), total=len(test),
-                                                       desc=f"test data"):
+        for eval_step, (data, _, data_lens, _) in tqdm(enumerate(test), total=len(test), desc=f"test data"):
             data = data.to(self.device)
             output = self.model(data, data_lens)
             _, predicted = torch.max(output, 1)
             prediction += predicted.tolist()
-        return [self.vocab.i2label[i] for i in prediction]
+        return [self.target_vocab.i2token[i] for i in prediction]
 
     def bleu_score(self, predict: List, target: List):
-        predict, target = self.get_unpadded_samples(predict, target)
-        bleu = sacrebleu.corpus_bleu(predict,target)
+        predict, target = self.get_un_padded_samples(predict, target)
+        bleu = sacrebleu.corpus_bleu(predict, target)
         return bleu.score
 
-    def get_unpadded_samples(self, predict, target):
+    def get_un_padded_samples(self, predict, target):
         no_pad_predict = []
         no_pad_target = []
 
@@ -185,7 +170,7 @@ class Trainer:
             no_pad_target.append(" ".join(unpad_t))
         return no_pad_predict, [no_pad_target]
 
-    def dump_test_file(self, test_prediction, test_file_path): #TODO
+    def dump_test_file(self, test_prediction, test_file_path):  # TODO
         res = []
         cur_i = 0
         with open(test_file_path) as f:
@@ -205,7 +190,7 @@ class Trainer:
 def parse_arguments():
     p = argparse.ArgumentParser(description='Hyper parameters')
     p.add_argument('-b', '--batch_size', type=int, default=4, help='number of epochs for train')
-    p.add_argument('-lr', type=float, default=0.001, help='initial learning rate')
+    p.add_argument('-lr', type=float, default=0.002, help='initial learning rate')
     p.add_argument('-hs', '--hidden_size', type=int, default=256, help='number of epochs for train')
     p.add_argument('-e', '--embed_size', type=int, default=128, help='number of epochs for train')
     p.add_argument('-p', '--dropout', type=float, default=0.3, help='number of epochs for train')
@@ -236,7 +221,7 @@ def main():
                                 source_vocab=source_vocab, target_vocab=target_vocab)
 
     trainer = Trainer(model=model, train_data=train_df, dev_data=dev_df, source_vocab=source_vocab,
-                      target_vocab=target_vocab, lr=args.lr, )
+                      target_vocab=target_vocab, lr=args.lr,train_batch_size=args.batch_size )
     trainer.train()
 
 if __name__ == '__main__':
