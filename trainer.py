@@ -1,5 +1,9 @@
 import argparse
+import os
+import random
 from typing import List
+
+import numpy as np
 import torch.nn as nn
 
 from data_sets import TranslationDataSet
@@ -12,6 +16,17 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 from torch.nn.utils.rnn import pad_sequence
 import sacrebleu
+
+
+def set_seed(seed):
+    os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'
+
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available() == 'cuda':
+        torch.cuda.manual_seed_all(seed)
+
 
 def pad_collate(batch):
     (ss, tt) = zip(*batch)
