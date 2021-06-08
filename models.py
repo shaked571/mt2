@@ -1,5 +1,8 @@
 import torch.nn as nn
 import torch
+import numpy as np
+from vocab import Vocab
+
 
 class EncoderAttention(nn.Module):
     def __init__(self, vocab_size, embed_size, hidden_size,
@@ -129,25 +132,13 @@ class DecoderVanilla(nn.Module):
         output = self.embedding(input_tok)
         output = self.relu(output)
         output, (hidden, cell) = self.lstm(output.unsqueeze(1), (hidden, cell))
-        #output = [seq len, batch size, hid dim * n directions]
-        #hidden = [n layers * n directions, batch size, hid dim]
-        #cell = [n layers * n directions, batch size, hid dim]
-
-        #seq len and n directions will always be 1 in the decoder, therefore:
-        #output = [1, batch size, hid dim]
-        #hidden = [n layers, batch size, hid dim]
-        #cell = [n layers, batch size, hid dim]
-        #Maybe do squeeze(1)
         output = self.out_linear(output) #N * 1 * lenght_of_vocab
         output = output.squeeze(1)
         return output, (hidden, cell)
 
 
-
-
-
-
 class Seq2Seq(nn.Module):
+    max_len = 50
     def __init__(self, encoder, decoder):
         super(Seq2Seq, self).__init__()
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -161,12 +152,13 @@ class Seq2Seq(nn.Module):
 
     def forward(self, src, trg, train):
         batch_size = src.size(0)
-        max_len = trg.size(1)
+        max_len = trg.size(1) if train else self.max_len
         vocab_size = self.decoder.vocab_size
-        outputs = [torch.zeros(batch_size, vocab_size, requires_grad=True, device=self.device)]
-
+        #init the strat output with 1 in the start index and 0 on the rest
+        start_output = np.zeros((batch_size, vocab_size))
+        start_output[:, 1] = 1
+        outputs = [torch.tensor(start_output,  device=self.device, dtype=torch.float64, requires_grad=True)]
         hidden, cell = self.encoder(src)
-
         output = trg[:, 0]
         for t in range(1, max_len):
             if type(self.encoder) == EncoderVanilla:
@@ -180,7 +172,11 @@ class Seq2Seq(nn.Module):
             if train:
                 output = trg[:, t]
             else:
-                output[:, 0] = -100 # Dont allow prediction of Padding index.
+                output[:, 0] = -100  # Dont allow prediction of Padding index.
                 output = output.argmax(1)
-        outputs = torch.stack(outputs,dim=1)
+                if all([i == Vocab.END_IDX for i in output.numpy()]): # Support Dev only for batch in size of 1
+                    break
+
+
+        outputs = torch.stack(outputs, dim=1)
         return outputs

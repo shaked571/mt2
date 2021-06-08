@@ -5,6 +5,7 @@ from typing import List
 
 import numpy as np
 import torch.nn as nn
+import torch.nn.functional as F
 
 from data_sets import TranslationDataSet
 from models import EncoderVanilla, DecoderVanilla, Seq2Seq
@@ -82,7 +83,7 @@ class Trainer:
                 output_dim = output.shape[-1]        # Handling batch size N > 1
                 output = output.view(-1, output_dim) # Handling batch size N > 1
 
-            # calculate the loss
+                # calculate the loss
                 loss = self.loss_func(output, target.view(-1))
                 # backward pass: compute gradient of the loss with respect to model parameters
                 loss.backward()
@@ -110,10 +111,19 @@ class Trainer:
                 target = target.to(self.device)
                 output = self.model(source, target, train=False)
                 output_dim = output.shape[-1]
+                output = output.view(-1, output_dim)
+                target = target.view(-1)
+                padding_len = abs(len(target) - len(output))
+                if len(target) > len(output):
+                    out_pad = torch.zeros((padding_len, output_dim))
+                    output = torch.cat((output, out_pad))
+                elif len(output) > len(target):
+                    target_pad = torch.zeros(padding_len)
+                    target = torch.cat((target, target_pad)).type(torch.int64)
 
-                loss = self.loss_func(output.view(-1, output_dim), target.view(-1))
+                loss = self.loss_func(output, target)
                 loss += loss.item()
-                predicted = torch.argmax(output.view(-1, output_dim), dim=1)
+                predicted = torch.argmax(output, dim=1)
                 prediction.append(predicted.view(-1).tolist())
                 all_target.append(target.view(-1).tolist())
 
@@ -127,7 +137,6 @@ class Trainer:
                     self.best_score = bleu_score
                     print("best score: ", self.best_score)
                     torch.save(self.model.state_dict(), self.saved_model_path)
-
             else:
                 print(f'Accuracy/train_{stage}: {bleu_score}')
 
@@ -154,6 +163,7 @@ class Trainer:
 
     def bleu_score(self, predict: List, target: List):
         predict, target = self.get_un_padded_samples(predict, target)
+
         bleu = sacrebleu.corpus_bleu(predict, target)
         return bleu.score
 
@@ -164,11 +174,20 @@ class Trainer:
         for p_sen, t_sen in zip(predict, target):
             unpad_t = []
             unpad_p = []
-            for p, t in zip(p_sen, t_sen):
-                if t == 0:
-                    continue
-                unpad_t.append(self.target_vocab.i2token[t])
-                unpad_p.append(self.target_vocab.i2token[p])
+            finish_pred = False
+            finish_target = False
+            for p, t in zip(p_sen[1:], t_sen[1:]):
+                if not finish_target:
+                    if t == self.target_vocab.END_IDX:
+                        finish_target = True
+                        continue
+                    unpad_t.append(self.target_vocab.i2token[t])
+                if not finish_pred:
+                    if p == self.target_vocab.END_IDX:
+                        finish_pred = True
+                        continue
+                    unpad_p.append(self.target_vocab.i2token[p])
+
             no_pad_predict.append(" ".join(unpad_p))
             no_pad_target.append(" ".join(unpad_t))
         return no_pad_predict, [no_pad_target]
@@ -195,8 +214,9 @@ def parse_arguments():
     p.add_argument('-b', '--batch_size', type=int, default=4, help='number of epochs for train')
     p.add_argument('-lr', type=float, default=0.002, help='initial learning rate')
     p.add_argument('-hs', '--hidden_size', type=int, default=256, help='number of epochs for train')
-    p.add_argument('-e', '--embed_size', type=int, default=128, help='number of epochs for train')
-    p.add_argument('-p', '--dropout', type=float, default=0.3, help='number of epochs for train')
+    p.add_argument('-e', '--embed_size', type=int, default=128, help='embdedding size')
+    p.add_argument('-p', '--dropout', type=float, default=0.3, help='droput precetage ')
+    p.add_argument('-n', '--n_layers', type=int, default=2, help='number of epochs for train')
 
     return p.parse_args()
 
@@ -213,9 +233,9 @@ def main():
     source_vocab = Vocab(data_path.format("train", "src"))
     target_vocab = Vocab(data_path.format("train", "trg"))
     encoder = EncoderVanilla(vocab_size=source_vocab.vocab_size, embed_size=embed_size, hidden_size=hidden_size,
-                             n_layers=3, dropout=args.dropout)
+                             n_layers=args.n_layers, dropout=args.dropout)
     decoder = DecoderVanilla(vocab_size=target_vocab.vocab_size, embed_size=embed_size, hidden_size=hidden_size,
-                             n_layers=3, dropout=args.dropout)
+                             n_layers=args.n_layers, dropout=args.dropout)
     model = Seq2Seq(encoder, decoder)
     print(model)
     train_df = TranslationDataSet(source=data_path.format("train", "src"), target=data_path.format("train", "trg"),

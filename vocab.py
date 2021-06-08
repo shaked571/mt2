@@ -4,14 +4,15 @@ class Vocab:
     END = "</s>"
     PAD_DUMMY = "PAD_DUMMY"  # TODO maybe to reomve
     PAD_IDX = 0  # TODO maybe to reomve
-
+    START_IDX = 1
+    END_IDX = 2
     def __init__(self, train_file):
         self.train_file = train_file
         self.tokens = self.get_unique()
         self.tokens = list(self.tokens)
         self.tokens.insert(self.PAD_IDX, self.PAD_DUMMY)
-        self.tokens.insert(self.PAD_IDX+1, self.START)
-        self.tokens.insert(self.PAD_IDX+2, self.END)
+        self.tokens.insert(self.START_IDX, self.START)
+        self.tokens.insert(self.END_IDX, self.END)
 
         self.vocab_size = len(self.tokens)
         self.i2token = {i: w for i, w in enumerate(self.tokens)}
