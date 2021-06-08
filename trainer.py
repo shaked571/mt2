@@ -115,10 +115,10 @@ class Trainer:
                 target = target.view(-1)
                 padding_len = abs(len(target) - len(output))
                 if len(target) > len(output):
-                    out_pad = torch.zeros((padding_len, output_dim))
+                    out_pad = torch.zeros((padding_len, output_dim), device=self.device)
                     output = torch.cat((output, out_pad))
                 elif len(output) > len(target):
-                    target_pad = torch.zeros(padding_len)
+                    target_pad = torch.zeros(padding_len, device=self.device)
                     target = torch.cat((target, target_pad)).type(torch.int64)
 
                 loss = self.loss_func(output, target)
