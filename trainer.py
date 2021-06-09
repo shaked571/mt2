@@ -5,10 +5,9 @@ from typing import List
 
 import numpy as np
 import torch.nn as nn
-import torch.nn.functional as F
 
 from data_sets import TranslationDataSet
-from models import EncoderVanilla, DecoderVanilla, Seq2Seq
+from models import EncoderVanilla, DecoderVanilla,DecoderAttention, Seq2Seq
 from vocab import Vocab
 import torch
 from torch.utils.data import DataLoader, Dataset
@@ -154,11 +153,13 @@ class Trainer:
         self.model.load_state_dict(torch.load(self.saved_model_path))
         self.model.eval()
         prediction = []
-        for eval_step, (data, _, data_lens, _) in tqdm(enumerate(test), total=len(test), desc=f"test data"):
-            data = data.to(self.device)
-            output = self.model(data, data_lens)
-            _, predicted = torch.max(output, 1)
-            prediction += predicted.tolist()
+        for eval_step, (source, target_dummy, source_lens, target_lens) in tqdm(enumerate(test), total=len(test), desc=f"test data"):
+            source = source.to(self.device)
+            output = self.model(source, target_dummy, train=False)
+            output_dim = output.shape[-1]
+            output = output.view(-1, output_dim)
+            predicted = torch.argmax(output, dim=1)
+            prediction.append(predicted.view(-1).tolist())
         return [self.target_vocab.i2token[i] for i in prediction]
 
     def bleu_score(self, predict: List, target: List):
@@ -211,6 +212,7 @@ class Trainer:
 
 def parse_arguments():
     p = argparse.ArgumentParser(description='Hyper parameters')
+    p.add_argument('decoder', help="decoder type: {v, a} when 'v' is DecoderVanilla and 'a' is AttentionDecoder.")
     p.add_argument('-b', '--batch_size', type=int, default=4, help='number of epochs for train')
     p.add_argument('-lr', type=float, default=0.002, help='initial learning rate')
     p.add_argument('-hs', '--hidden_size', type=int, default=256, help='number of epochs for train')
@@ -232,10 +234,21 @@ def main():
 
     source_vocab = Vocab(data_path.format("train", "src"))
     target_vocab = Vocab(data_path.format("train", "trg"))
+
     encoder = EncoderVanilla(vocab_size=source_vocab.vocab_size, embed_size=embed_size, hidden_size=hidden_size,
                              n_layers=args.n_layers, dropout=args.dropout)
-    decoder = DecoderVanilla(vocab_size=target_vocab.vocab_size, embed_size=embed_size, hidden_size=hidden_size,
-                             n_layers=args.n_layers, dropout=args.dropout)
+    if args.decoder == 'v':
+        decoder = DecoderVanilla(vocab_size=target_vocab.vocab_size, embed_size=embed_size, hidden_size=hidden_size,
+                                 n_layers=args.n_layers, dropout=args.dropout)
+    elif args.decoder == 'a':
+        # encoder = EncoderAttention(vocab_size=source_vocab.vocab_size, embed_size=embed_size, hidden_size=hidden_size,
+        #                          n_layers=args.n_layers, dropout=args.dropout)
+        #
+        decoder = DecoderAttention(vocab_size=target_vocab.vocab_size, embed_size=embed_size, hidden_size=hidden_size,
+                                   n_layers=args.n_layers, dropout=args.dropout)
+    else:
+        raise ValueError("Support decoder type: {v, a} when 'v' is DecoderVanilla and 'a' is AttentionDecoder.")
+
     model = Seq2Seq(encoder, decoder)
     print(model)
     train_df = TranslationDataSet(source=data_path.format("train", "src"), target=data_path.format("train", "trg"),
@@ -246,6 +259,7 @@ def main():
     trainer = Trainer(model=model, train_data=train_df, dev_data=dev_df, source_vocab=source_vocab,
                       target_vocab=target_vocab, lr=args.lr,train_batch_size=args.batch_size )
     trainer.train()
+
 
 if __name__ == '__main__':
     main()
