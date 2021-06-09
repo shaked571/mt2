@@ -155,7 +155,7 @@ class DecoderAttention(nn.Module):
         rnn_input = torch.cat([embedded, context], 1)
         output,  (hidden, cell) = self.lstm(rnn_input.unsqueeze(0),  (hidden, cell))
         output = output.squeeze(0)  # (1,B,N) -> (B,N)
-        context = context.squeeze(0)
+        context = context.squeeze(0) if len(context.shape) == 3 else context #dealing with batch size 1
         output = self.out_linear(torch.cat([output, context], 1))
         return output, hidden, attn_weights
 
