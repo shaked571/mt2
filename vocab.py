@@ -9,7 +9,6 @@ class Vocab:
     def __init__(self, train_file):
         self.train_file = train_file
         self.tokens = self.get_unique()
-        self.tokens = list(self.tokens)
         self.tokens.insert(self.PAD_IDX, self.PAD_DUMMY)
         self.tokens.insert(self.START_IDX, self.START)
         self.tokens.insert(self.END_IDX, self.END)
@@ -24,14 +23,18 @@ class Vocab:
         return self.token2i[self.UNK]
 
     def get_unique(self):
-        tokens = set()
+        tokens = []
+        token_seen = set()
         with open(self.train_file) as f:
             lines = f.readlines()
         for line in lines:
             if line == "" or line == "\n":
                 continue
-            tokens.update(line.strip().split())
-        tokens.update([self.UNK])
+            for t in line.strip().split():
+                if t not in token_seen:
+                    token_seen.update(t)
+                    tokens.append(t)
+        tokens.append(self.UNK)
         return tokens
 
 

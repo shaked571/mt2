@@ -2,6 +2,7 @@ import argparse
 import os
 import random
 from typing import List
+from timeit import default_timer as timer
 
 import numpy as np
 import torch.nn as nn
@@ -17,10 +18,9 @@ from tqdm import tqdm
 from torch.nn.utils.rnn import pad_sequence
 import sacrebleu
 
-
+all_eval_times = []
 def set_seed(seed):
     os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'
-
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -41,9 +41,9 @@ def pad_collate(batch):
 
 class Trainer:
     def __init__(self, model: nn.Module, train_data: Dataset, dev_data: Dataset, source_vocab: Vocab,
-                 target_vocab: Vocab, train_batch_size=2, lr=0.002, part=None, output_path=None):
+                 target_vocab: Vocab, train_batch_size=2, lr=0.002,out_path=None):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.part = part
+        self.part = 1 if type(model.decoder) == DecoderVanilla else 2
         self.model = model
         self.dev_batch_size = 1
         self.n_epochs = 10
@@ -55,21 +55,24 @@ class Trainer:
         self.loss_func = nn.CrossEntropyLoss(ignore_index=self.target_vocab.PAD_IDX)
         self.model.to(self.device)
         self.model_args = {"part": self.part, "lr": lr, "batch_size": train_batch_size,
-                           "hidden_dim": self.model.encoder.hidden_size}
-        if output_path is None:
-            output_path = self.suffix_run()
+                           "embed_size": self.model.encoder.embed_size,
+                           "hidden_dim": self.model.encoder.hidden_size * 2, "dropout": self.model.decoder.dropout.p,
+                           "n_layers": self.model.decoder.n_layers}
+        if out_path is None:
+            out_path = self.suffix_run()
 
-        self.saved_model_path = f"{output_path}.bin"
-        self.writer = SummaryWriter(log_dir=f"tensor_board/{output_path}")
+        self.saved_model_path = f"{out_path}.bin"
+        self.writer = SummaryWriter(log_dir=f"tensor_board/{out_path}")
         self.best_model = None
         self.best_score = 0
 
-    def train(self):
+    def train(self, dump_vis=False):
         for epoch in range(self.n_epochs):
             print(f"start epoch: {epoch + 1}")
             train_loss = 0.0
             step_loss = 0
             self.model.train()  # prep model for training
+            self.model.decoder.
             for step, (source, target, source_lens, target_lens) in tqdm(enumerate(self.train_data),
                                                                          total=len(self.train_data)):
                 source = source.to(self.device)
@@ -94,42 +97,22 @@ class Trainer:
                 step_loss += loss.item() * target.size(0)
             print(f"in epoch: {epoch + 1} train loss: {train_loss}")
             self.writer.add_scalar('Loss/train', train_loss, epoch + 1)
-            print((epoch + 1) * len(self.train_data) * self.train_data.batch_size)
-            self.evaluate_model((epoch + 1) * len(self.train_data) * self.train_data.batch_size, "epoch", self.dev_data)
+            self.evaluate_model(epoch + 1, "epoch", self.dev_data)
+        print(f"average time to evaluate: {sum(all_eval_times) / len(all_eval_times)}")
 
-    def evaluate_model(self, step, stage, data_set, write=True):
+    def evaluate_model(self, step, stage, data_set, load_model=False, write=True):
+        if load_model:
+            checkpoint = torch.load(self.saved_model_path, map_location="cuda" if torch.cuda.is_available() else "cpu")
+            self.model.load_state_dict(checkpoint)
         with torch.no_grad():
-            self.model.eval()
-            loss = 0
+            bleu_score, loss, start_eval_time = self.eval_loop(data_set, step)
+            end_eval_time = timer()
+            time_to_evaluate = end_eval_time - start_eval_time
+            all_eval_times.append(time_to_evaluate)
+            print(f"Eval time for stage {stage}-step {step} is: {time_to_evaluate} ")
 
-            prediction = []
-            all_target = []
-            for eval_step, (source, target, source_lens, target_lens) in tqdm(enumerate(data_set), total=len(data_set),
-                                                                              desc=f"dev step {step} loop"):
-                source = source.to(self.device)
-                target = target.to(self.device)
-                output = self.model(source, target, train=False)
-                output_dim = output.shape[-1]
-                output = output.view(-1, output_dim)
-                target = target.view(-1)
-                padding_len = abs(len(target) - len(output))
-                if len(target) > len(output):
-                    out_pad = torch.zeros((padding_len, output_dim), device=self.device)
-                    output = torch.cat((output, out_pad))
-                elif len(output) > len(target):
-                    target_pad = torch.zeros(padding_len, device=self.device)
-                    target = torch.cat((target, target_pad)).type(torch.int64)
-
-                loss = self.loss_func(output, target)
-                loss += loss.item()
-                predicted = torch.argmax(output, dim=1)
-                prediction.append(predicted.view(-1).tolist())
-                all_target.append(target.view(-1).tolist())
-
-            bleu_score = self.bleu_score(prediction, all_target)
             if write:
                 print(f'bleu_score/dev_{stage}: {bleu_score}')
-
                 self.writer.add_scalar(f'bleu_score/dev_{stage}', bleu_score, step)
                 self.writer.add_scalar(f'Loss/dev_{stage}', loss, step)
                 if bleu_score > self.best_score:
@@ -137,9 +120,38 @@ class Trainer:
                     print("best score: ", self.best_score)
                     torch.save(self.model.state_dict(), self.saved_model_path)
             else:
-                print(f'Accuracy/train_{stage}: {bleu_score}')
-
+                print(f'bleu_score/{stage}: {bleu_score}')
         self.model.train()
+
+    def eval_loop(self, data_set, step):
+        self.model.eval()
+        loss = 0
+        prediction = []
+        all_target = []
+        start_eval_time = timer()
+        for eval_step, (source, target, source_lens, target_lens) in tqdm(enumerate(data_set), total=len(data_set),
+                                                                          desc=f"dev step {step} loop"):
+            source = source.to(self.device)
+            target = target.to(self.device)
+            output = self.model(source, target, train=False)
+            output_dim = output.shape[-1]
+            output = output.view(-1, output_dim)
+            target = target.view(-1)
+            padding_len = abs(len(target) - len(output))
+            if len(target) > len(output):
+                out_pad = torch.zeros((padding_len, output_dim), device=self.device)
+                output = torch.cat((output, out_pad))
+            elif len(output) > len(target):
+                target_pad = torch.zeros(padding_len, device=self.device)
+                target = torch.cat((target, target_pad)).type(torch.int64)
+
+            loss = self.loss_func(output, target)
+            loss += loss.item()
+            predicted = torch.argmax(output, dim=1)
+            prediction.append(predicted.view(-1).tolist())
+            all_target.append(target.view(-1).tolist())
+        bleu_score = self.bleu_score(prediction, all_target)
+        return bleu_score, loss, start_eval_time
 
     def suffix_run(self):
         res = ""
@@ -193,22 +205,6 @@ class Trainer:
             no_pad_target.append(" ".join(unpad_t))
         return no_pad_predict, [no_pad_target]
 
-    def dump_test_file(self, test_prediction, test_file_path):  # TODO
-        res = []
-        cur_i = 0
-        with open(test_file_path) as f:
-            lines = f.readlines()
-        for line in lines:
-            if line == "" or line == "\n":
-                res.append(line)
-            else:
-                pred = f"{line.strip()} {test_prediction[cur_i]}\n"
-                res.append(pred)
-                cur_i += 1
-        pred_path = f"{self.suffix_run()}.tsv"
-        with open(pred_path, mode='w') as f:
-            f.writelines(res)
-
 
 def parse_arguments():
     p = argparse.ArgumentParser(description='Hyper parameters')
@@ -216,9 +212,10 @@ def parse_arguments():
     p.add_argument('-b', '--batch_size', type=int, default=4, help='number of epochs for train')
     p.add_argument('-lr', type=float, default=0.002, help='initial learning rate')
     p.add_argument('-hs', '--hidden_size', type=int, default=256, help='number of epochs for train')
-    p.add_argument('-e', '--embed_size', type=int, default=128, help='embdedding size')
-    p.add_argument('-p', '--dropout', type=float, default=0.3, help='droput precetage ')
-    p.add_argument('-n', '--n_layers', type=int, default=2, help='number of epochs for train')
+    p.add_argument('-e', '--embed_size', type=int, default=128, help='embedding size')
+    p.add_argument('-p', '--dropout', type=float, default=0.3, help='dropout precentage')
+    p.add_argument('-n', '--n_layers', type=int, default=2, help='number of layers in rnn')
+    p.add_argument('-o', '--out_path', type=str, help='number of epochs for train')
 
     return p.parse_args()
 
@@ -241,9 +238,6 @@ def main():
         decoder = DecoderVanilla(vocab_size=target_vocab.vocab_size, embed_size=embed_size, hidden_size=hidden_size,
                                  n_layers=args.n_layers, dropout=args.dropout)
     elif args.decoder == 'a':
-        # encoder = EncoderAttention(vocab_size=source_vocab.vocab_size, embed_size=embed_size, hidden_size=hidden_size,
-        #                          n_layers=args.n_layers, dropout=args.dropout)
-        #
         decoder = DecoderAttention(vocab_size=target_vocab.vocab_size, embed_size=embed_size, hidden_size=hidden_size,
                                    n_layers=args.n_layers, dropout=args.dropout)
     else:
@@ -257,7 +251,7 @@ def main():
                                 source_vocab=source_vocab, target_vocab=target_vocab)
 
     trainer = Trainer(model=model, train_data=train_df, dev_data=dev_df, source_vocab=source_vocab,
-                      target_vocab=target_vocab, lr=args.lr,train_batch_size=args.batch_size )
+                      target_vocab=target_vocab, lr=args.lr,train_batch_size=args.batch_size, out_path=args.out_path)
     trainer.train()
 
 
