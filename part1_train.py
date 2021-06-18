@@ -3,12 +3,12 @@ from models import EncoderVanilla, DecoderVanilla, Seq2Seq
 from trainer import Trainer, set_seed
 from vocab import Vocab
 # Create a static model
-hidden_size = 256
-embed_size = 128
+hidden_size = 128
+embed_size = 256
 n_layers = 2
-dropout = 0.4
+dropout = 0.3
 lr = 0.002
-batch_size = 2
+batch_size = 4
 data_path = "data/{}.{}"
 source_vocab = Vocab(data_path.format("train", "src"))
 target_vocab = Vocab(data_path.format("train", "trg"))

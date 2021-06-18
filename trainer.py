@@ -8,7 +8,7 @@ import numpy as np
 import torch.nn as nn
 
 from data_sets import TranslationDataSet
-from models import EncoderVanilla, DecoderVanilla,DecoderAttention, Seq2Seq
+from models import EncoderVanilla, DecoderVanilla, DecoderAttention, Seq2Seq
 from vocab import Vocab
 import torch
 from torch.utils.data import DataLoader, Dataset
@@ -18,7 +18,14 @@ from tqdm import tqdm
 from torch.nn.utils.rnn import pad_sequence
 import sacrebleu
 
+import matplotlib.pyplot as plt
+
+plt.switch_backend('agg')
+import matplotlib.ticker as ticker
+
 all_eval_times = []
+
+
 def set_seed(seed):
     os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'
     random.seed(seed)
@@ -39,9 +46,27 @@ def pad_collate(batch):
     return xx_pad, yy_pad, source_lens, target_lens
 
 
+def showAttention(input_sentence, output_words, attentions):
+    # Set up figure with colorbar
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    cax = ax.matshow(attentions.numpy(), cmap='bone')
+    fig.colorbar(cax)
+
+    # Set up axes
+    ax.set_xticklabels([''] + input_sentence.split(' ') + ['<EOS>'], rotation=90)
+    ax.set_yticklabels([''] + output_words)
+
+    # Show label at every tick
+    ax.xaxis.set_major_locator(ticker.MultipleLocator(1))
+    ax.yaxis.set_major_locator(ticker.MultipleLocator(1))
+
+    plt.show()
+
+
 class Trainer:
     def __init__(self, model: nn.Module, train_data: Dataset, dev_data: Dataset, source_vocab: Vocab,
-                 target_vocab: Vocab, train_batch_size=2, lr=0.002,out_path=None):
+                 target_vocab: Vocab, train_batch_size=2, lr=0.002, out_path=None):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.part = 1 if type(model.decoder) == DecoderVanilla else 2
         self.model = model
@@ -72,7 +97,7 @@ class Trainer:
             train_loss = 0.0
             step_loss = 0
             self.model.train()  # prep model for training
-            self.model.decoder.
+
             for step, (source, target, source_lens, target_lens) in tqdm(enumerate(self.train_data),
                                                                          total=len(self.train_data)):
                 source = source.to(self.device)
@@ -82,8 +107,8 @@ class Trainer:
                 self.model.zero_grad()
                 # forward pass: compute predicted outputs by passing inputs to the model
                 output = self.model(source, target, train=True)
-                output_dim = output.shape[-1]        # Handling batch size N > 1
-                output = output.view(-1, output_dim) # Handling batch size N > 1
+                output_dim = output.shape[-1]  # Handling batch size N > 1
+                output = output.view(-1, output_dim)  # Handling batch size N > 1
 
                 # calculate the loss
                 loss = self.loss_func(output, target.view(-1))
@@ -97,8 +122,12 @@ class Trainer:
                 step_loss += loss.item() * target.size(0)
             print(f"in epoch: {epoch + 1} train loss: {train_loss}")
             self.writer.add_scalar('Loss/train', train_loss, epoch + 1)
-            self.evaluate_model(epoch + 1, "epoch", self.dev_data)
-        print(f"average time to evaluate: {sum(all_eval_times) / len(all_eval_times)}")
+            if dump_vis:
+                self.dump_vis_attention(epoch + 1)
+            else:
+                self.evaluate_model(epoch + 1, "epoch", self.dev_data)
+        if len(all_eval_times) > 0:
+            print(f"average time to evaluate: {sum(all_eval_times) / len(all_eval_times)}")
 
     def evaluate_model(self, step, stage, data_set, load_model=False, write=True):
         if load_model:
@@ -165,7 +194,8 @@ class Trainer:
         self.model.load_state_dict(torch.load(self.saved_model_path))
         self.model.eval()
         prediction = []
-        for eval_step, (source, target_dummy, source_lens, target_lens) in tqdm(enumerate(test), total=len(test), desc=f"test data"):
+        for eval_step, (source, target_dummy, source_lens, target_lens) in tqdm(enumerate(test), total=len(test),
+                                                                                desc=f"test data"):
             source = source.to(self.device)
             output = self.model(source, target_dummy, train=False)
             output_dim = output.shape[-1]
@@ -204,6 +234,16 @@ class Trainer:
             no_pad_predict.append(" ".join(unpad_p))
             no_pad_target.append(" ".join(unpad_t))
         return no_pad_predict, [no_pad_target]
+
+    def dump_vis_attention(self, epoch):
+        # Take the integer value of <sos> from the target vocabulary.
+        source, target, source_len, target_len = list(self.dev_data)[71]
+        with torch.no_grad():
+            self.model(source.to(self.device), target.to(self.device), train=False, target_vocab=self.target_vocab, epoch=epoch)
+
+
+
+
 
 
 def parse_arguments():
@@ -251,7 +291,7 @@ def main():
                                 source_vocab=source_vocab, target_vocab=target_vocab)
 
     trainer = Trainer(model=model, train_data=train_df, dev_data=dev_df, source_vocab=source_vocab,
-                      target_vocab=target_vocab, lr=args.lr,train_batch_size=args.batch_size, out_path=args.out_path)
+                      target_vocab=target_vocab, lr=args.lr, train_batch_size=args.batch_size, out_path=args.out_path)
     trainer.train()
 
 

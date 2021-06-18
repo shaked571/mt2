@@ -127,3 +127,10 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+tensor_board_old/
+tensor_board/
+part_2_lr_0.002_batch_size_2_embed_size_256_hidden_dim_256_dropout_0.4_n_layers_2.bin
+part_2_lr_0.002_batch_size_2_embed_size_256_hidden_dim_256_dropout_0.4_n_layers_3.bin
+part_2_lr_0.002_batch_size_4_embed_size_256_hidden_dim_256_dropout_0.3_n_layers_2.bin
+part_2_lr_0.002_batch_size_4_embed_size_256_hidden_dim_256_dropout_0.4_n_layers_2.bin
+.idea/

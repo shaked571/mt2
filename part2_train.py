@@ -7,7 +7,7 @@ embed_size = 256
 n_layers = 2
 dropout = 0.3
 lr = 0.002
-batch_size = 4
+batch_size = 8
 data_path = "data/{}.{}"
 
 source_vocab = Vocab(data_path.format("train", "src"))

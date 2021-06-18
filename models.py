@@ -3,6 +3,14 @@ import torch
 import numpy as np
 from vocab import Vocab
 
+import matplotlib.pylab as pylab
+params = {'legend.fontsize': 'x-large',
+          'figure.figsize': (15, 5),
+          'axes.labelsize': 'x-large',
+          'axes.titlesize':'x-large',
+          'xtick.labelsize':'x-large',
+          'ytick.labelsize':'x-large'}
+pylab.rcParams.update(params)
 
 
 class Attention(nn.Module):
@@ -131,9 +139,10 @@ class Seq2Seq(nn.Module):
             "Encoder and decoder must have equal number of layers!"
 
 
-    def forward(self, src, trg, train):
+    def forward(self, src, trg, train, target_vocab=None, epoch=None):
+        max_len = trg.size(1) if train or target_vocab is not None else self.max_len
+        attentions = []
         batch_size = src.size(0)
-        max_len = trg.size(1) if train else self.max_len
         vocab_size = self.decoder.vocab_size
         #init the strat output with 1 in the start index and 0 on the rest
         start_output = np.zeros((batch_size, vocab_size))
@@ -147,15 +156,62 @@ class Seq2Seq(nn.Module):
                     output, hidden, cell)
             else:  # Attention
                 output, hidden, attn_weights = self.decoder(
-                    output, hidden,cell, encoder_output)
+                    output, hidden, cell, encoder_output)
+                if target_vocab is not None:
+                    attentions.append(attn_weights)
+
             outputs.append(output)
             if train:
                 output = trg[:, t]
+            elif target_vocab is not None: # for visualization
+                output = trg[0][t].unsqueeze(0)
             else:
                 output[:, 0] = -100  # Dont allow prediction of Padding index.
                 output = output.argmax(1)
                 if all([i == Vocab.END_IDX for i in output.cpu().numpy()]):  # Support Dev only for batch in size of 1
                     break
+        if target_vocab is not None:
 
+            attentions = torch.stack(attentions, dim=1)
+            display_attention(src, outputs, attentions, target_vocab, epoch)
         outputs = torch.stack(outputs, dim=1)
         return outputs
+
+import matplotlib.pyplot as plt
+
+import matplotlib.ticker as ticker
+
+
+def display_attention(sentence, translation, attention, target_vocab:Vocab, epoch):
+    fig = plt.figure(figsize=(10, 10))
+
+    ax = fig.add_subplot(111)
+
+
+    # sentence_i = ['<s>', '104', '111', '108', '100', '105', '110', '103', '46', '</s>']
+    sentence_i = ['<s>', '97', '103', '97', '105', '110', '115', '116'] #97 103 97 105 110 115 116
+    # sentence = ['', 'h', 'o', 'l', 'd', 'i', 'n', 'g', '.', '']
+    sentence = ['', 'a', 'g', 'a', 'i', 'n', 's', 't']
+
+    translation_res = [target_vocab.i2token[i.item()] for i in torch.stack(translation, dim=1).squeeze().argmax(1)]
+    attention_f = attention.squeeze(0).cpu().detach().numpy()[:, 1:]#, 1:-1]
+
+    cax = ax.matshow(attention_f, cmap='bone')
+
+    ax.tick_params(labelsize=15, direction='out')
+    print("res: " , translation_res)
+    print("x:", [''] + [f'{t}-{i}' for t, i in zip(sentence, sentence_i)])
+    ax.set_xticklabels([''] + [f'{t}-{i}' for t, i in zip(sentence, sentence_i)],
+                       rotation=45)
+    ax.set_yticklabels([''] + translation_res + [''])
+
+    ax.xaxis.set_major_locator(ticker.MultipleLocator(1))
+    ax.yaxis.set_major_locator(ticker.MultipleLocator(1))
+    ax.set_title(f"Attention epoch {epoch}",fontdict={'fontsize': 20, 'fontweight': 'medium'})
+    ax.set_xlabel(f"Source")
+    ax.set_ylabel(f"Prediction")
+    ax.xaxis.label.set_size(15)
+    ax.yaxis.label.set_size(15)
+    plt.savefig(f"Attention_epoch_{epoch}.png")
+    plt.show()
+    plt.close()
